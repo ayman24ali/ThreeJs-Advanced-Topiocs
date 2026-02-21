@@ -23,7 +23,8 @@ export class GeometryManager {
     const geometry = new THREE.PlaneGeometry( width, height , widthSegment, heightSegment );
     const material = new THREE.ShaderMaterial({vertexShader:VertexShader,fragmentShader:FragmentShader,uniforms:{
         uMinHeight: { value: -200.0 },
-        uMaxHeight: { value: 200.0 }
+        uMaxHeight: { value: 200.0 },
+        uSunDir:    { value: new THREE.Vector3(1.2, 2.0, 0.8).normalize() },
       }} );
     const plane = new THREE.Mesh( geometry, material );
     
