@@ -1,5 +1,26 @@
 
+/**
+ * PerlinNoise
+ * -----------
+ * Implements Ken Perlin's classic 2D gradient-noise algorithm.
+ *
+ * How it works (high-level):
+ *  1. The input point (x, y) is placed into a unit-square grid cell.
+ *  2. The four corners of that cell each get a pseudo-random gradient
+ *     vector derived from a permutation table.
+ *  3. A dot product between each gradient and the offset from that
+ *     corner to (x, y) produces an "influence" value per corner.
+ *  4. The four influences are smoothly blended with a quintic (fade)
+ *     curve, yielding a continuous value in roughly [-1, 1].
+ *
+ * Result: smooth, tileable, infinite noise with no visible grid artefacts.
+ */
 export class PerlinNoise {
+    /**
+     * Reference permutation table — the original 256-entry shuffle
+     * used by Ken Perlin.  Kept read-only; the doubled working copy
+     * lives in `perm`.
+     */
     private p = [
         151, 160, 137, 91, 90, 15, 131, 13, 201, 95, 96, 53, 194, 233, 7, 225, 140, 36, 103, 30,
         69, 142, 8, 99, 37, 240, 21, 10, 23, 190, 6, 148, 247, 120, 234, 75, 0, 26, 197, 62, 94,
@@ -17,35 +38,68 @@ export class PerlinNoise {
         128, 195, 78, 66, 215, 61, 156, 180
     ];
 
+    /**
+     * Builds the doubled permutation table (indices 0-511) so that
+     * hash lookups never need a modulo operation.
+     */
     constructor() {
-// Fill permutation table
+        // Fill permutation table — copy p[] into both halves of perm[]
         for (let i = 0; i < 256; i++) this.perm[i] = this.perm[i + 256] = this.p[i];
     }
 
-// Permutation table - shuffled array of 0-255, doubled to avoid overflow
+    /**
+     * Working permutation table (512 entries = p[] duplicated).
+     * Doubling avoids index-overflow when hashing grid corners like perm[X+1].
+     */
     private perm = new Uint8Array(512);
 
-// Fade function - smooths interpolation (6t^5 - 15t^4 + 10t^3)
-    private fade(t:number) {
+    /**
+     * Quintic fade / ease curve: f(t) = 6t⁵ − 15t⁴ + 10t³
+     * Ken Perlin's "improved" version (2002).  Produces zero first AND
+     * second derivatives at t=0 and t=1, removing grid-aligned artefacts.
+     */
+    private fade(t: number) {
         return t * t * t * (t * (t * 6 - 15) + 10);
     }
 
-// Linear interpolation
-    private lerp(a:number, b:number, t:number) {
+    /**
+     * Standard linear interpolation between `a` and `b` by factor `t`.
+     * t=0 → a, t=1 → b.
+     */
+    private lerp(a: number, b: number, t: number) {
         return a + t * (b - a);
     }
 
-// Gradient function - maps hash to one of 8 gradient directions
-    private grad(hash:number, x:number, y:number) {
-        // Take last 3 bits of hash to pick a gradient vector
+    /**
+     * Maps a hash value to one of 4 gradient directions in 2-D.
+     * Uses the lowest 2 bits of `hash` to select (±x, ±y) pairs,
+     * giving a cheap dot-product with a pseudo-random unit vector.
+     *
+     * @param hash  - corner hash value from the permutation table
+     * @param x     - x-offset from the grid corner
+     * @param y     - y-offset from the grid corner
+     */
+    private grad(hash: number, x: number, y: number) {
+        // Take last 2 bits of hash to pick a gradient vector
         const h = hash & 3;
         const u = h < 2 ? x : y;
         const v = h < 2 ? y : x;
         return ((h & 1) ? -u : u) + ((h & 2) ? -v : v);
     }
 
-// 2D Perlin noise - returns value in roughly [-1, 1]
-    noise(x:number, y:number) {
+    /**
+     * Evaluates 2-D Perlin noise at world-space coordinates (x, y).
+     *
+     * Steps:
+     *  1. Identify the integer grid cell that contains (x, y).
+     *  2. Compute fractional offsets within that cell.
+     *  3. Apply fade curves to smooth the blend weights.
+     *  4. Hash all four corners via the permutation table.
+     *  5. Bilinearly interpolate the gradient dot-products.
+     *
+     * @returns A value in roughly [-1, 1].
+     */
+    noise(x: number, y: number) {
         // Grid cell coordinates
         const X = Math.floor(x) & 255;
         const Y = Math.floor(y) & 255;
