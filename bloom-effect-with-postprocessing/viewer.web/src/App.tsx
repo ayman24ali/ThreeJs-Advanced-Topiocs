@@ -5,6 +5,27 @@ import useLoadContextValue from "./hooks/useLoadContextValue";
 import {ViewerManager} from "./modules/viewer-api/viewer-manager";
 import ViewerContext from './stores/viewer-context';
 
+/**
+ * App  (Root Component)
+ *
+ * The top-level React component for the bloom-effect POC.
+ *
+ * Responsibilities:
+ *  - Holds a ref to the viewer `<div>` that the Three.js canvas is mounted into.
+ *  - Creates a `ViewerManager` instance exactly once (guarded by `isViewerCreated`)
+ *    and stores it in state so downstream components can access it.
+ *  - Builds the `ViewerContext` value via `useLoadContextValue` and provides it
+ *    to the entire component tree.
+ *  - Renders a PrimeReact `<Toast>` for in-app notifications.
+ *
+ * Rendering:
+ *  ```
+ *  <ViewerContext.Provider>
+ *    <Toast />                 ← notification overlay
+ *    <div #viewerDivRef />     ← Three.js canvas is appended here by ViewerManager
+ *  </ViewerContext.Provider>
+ *  ```
+ */
 function App() {
   const toast = useRef<any>(null);
   const viewerDivRef = useRef<HTMLDivElement>(null);
