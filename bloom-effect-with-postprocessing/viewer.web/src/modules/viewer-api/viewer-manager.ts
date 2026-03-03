@@ -11,22 +11,66 @@ import {ShaderPass} from "three/examples/jsm/postprocessing/ShaderPass";
 import {gaussianBlurFragmentShader} from "./shaders/gaussianBlurFragmentShader";
 import {compositeFragmentShader} from "./shaders/composite-fragment-shader";
 
+/**
+ * ViewerManager
+ *
+ * Central orchestrator for the Three.js bloom-effect POC.
+ *
+ * Responsibilities:
+ *  - Creates and owns the Three.js Scene, Camera, Renderer, and OrbitControls.
+ *  - Builds the manual bloom post-processing pipeline:
+ *      1. Renders the scene into `sceneRenderTarget` (preserves original pixels).
+ *      2. Feeds that texture through a ThresholdPass (bright-pass filter).
+ *      3. Applies 100× separable Gaussian blur passes (H then V).
+ *      4. Composites the blurred bloom on top of the original scene.
+ *  - Drives the animation loop via `requestAnimationFrame`.
+ *  - Handles window resize events.
+ */
 export class ViewerManager {
+  /** PrimeReact toast ref for in-app notifications. */
   toast: any;
+  /** The Three.js scene that holds all 3D objects and lights. */
   scene: THREE.Scene;
+  /** Perspective camera used to view the scene. */
   camera: THREE.PerspectiveCamera | undefined;
+  /** WebGL renderer that draws to the canvas. */
   renderer: THREE.WebGLRenderer | undefined;
+  /** The HTML div element the renderer's canvas is appended to. */
   container: HTMLDivElement;
+  /** OrbitControls — enables mouse-driven camera rotation, pan and zoom. */
   controls!: OrbitControls;
+  /** Manages creation and configuration of scene geometry (cube, plane). */
   geometryManager: GeometryManager;
+  /** Manages creation and configuration of lights. */
   lightManager:LightManager;
+  /** Three.js EffectComposer that chains all post-processing passes. */
   composer:EffectComposer|undefined;
+  /** Clock used for time-based animation (available for future use). */
   clock:THREE.Clock;
+  /** Horizontal Gaussian blur ShaderPass (direction = (1,0)). */
   blurPassH:ShaderPass|undefined;
+  /** Vertical Gaussian blur ShaderPass (direction = (0,1)). */
   blurPassV:ShaderPass|undefined;
+  /** Bright-pass threshold ShaderPass — isolates HDR/emissive pixels. */
   thresholdPass:ShaderPass | undefined;
+  /** Final composite ShaderPass — merges original scene with bloom result. */
+  compositePass:ShaderPass | undefined;
+  /** TexturePass that feeds `sceneRenderTarget` as the first step of the composer chain. */
+  texturePass:any;
+  /**
+   * Off-screen render target that captures the full original scene each frame.
+   * Its texture is used as `tOriginal` in the composite pass so non-glowing
+   * elements remain visible in the final output.
+   */
   sceneRenderTarget: THREE.WebGLRenderTarget<THREE.Texture>;
-  
+
+  /**
+   * Creates a new ViewerManager, sets up the render target, initialises the
+   * scene, and attaches window event listeners.
+   *
+   * @param containerRef - The HTML div that will host the WebGL canvas.
+   * @param toast        - PrimeReact toast ref for showing notifications.
+   */
   constructor(containerRef: HTMLDivElement, toast: any) {
     this.toast = toast;
     this.container = containerRef;
@@ -47,10 +91,27 @@ export class ViewerManager {
     this.attachEvents();
   }
   
+  /**
+   * Attaches global window event listeners (currently: resize).
+   */
   attachEvents = (): void => {
     window.addEventListener('resize', this.onWindowResize);
   }
   
+  /**
+   * Builds the complete Three.js scene and bloom post-processing pipeline.
+   *
+   * Steps performed:
+   *  1. Creates the PerspectiveCamera and WebGLRenderer.
+   *  2. Creates the EffectComposer with a TexturePass as the entry point.
+   *  3. Attaches OrbitControls to the camera.
+   *  4. Adds a cube (emissive HDR material) and a ground plane to the scene.
+   *  5. Adds a PointLight and an AmbientLight.
+   *  6. Constructs and chains the ThresholdPass, 100× Blur passes, and CompositePass.
+   *  7. Kicks off the animation loop.
+   *
+   * @param container - The HTML div element used for sizing and canvas attachment.
+   */
   initializeScene(container: HTMLDivElement): void {
     this.scene.background = new THREE.Color(0x050510);
     // Initialize camera and renderer
@@ -144,12 +205,40 @@ export class ViewerManager {
     // Start animation loop
     this.animate(cube);
   }
+  /**
+   * Creates a new horizontal Gaussian blur ShaderPass from the provided shader descriptor.
+   * Called in a loop to create 100 independent horizontal blur passes.
+   *
+   * @param BlurShaderH - Shader descriptor with uniforms for horizontal blur direction.
+   * @returns A configured `ShaderPass` instance for horizontal blurring.
+   */
   createBlurPassH(BlurShaderH:any){
     return new ShaderPass(BlurShaderH);
   }
+  /**
+   * Creates a new vertical Gaussian blur ShaderPass from the provided shader descriptor.
+   * Called in a loop to create 100 independent vertical blur passes.
+   *
+   * @param BlurShaderV - Shader descriptor with uniforms for vertical blur direction.
+   * @returns A configured `ShaderPass` instance for vertical blurring.
+   */
   createBlurPassV(BlurShaderV:any){
     return new ShaderPass(BlurShaderV);
   }
+  /**
+   * Main animation loop, driven by `requestAnimationFrame`.
+   *
+   * Each frame:
+   *  1. Rotates the target mesh slightly on X and Y axes.
+   *  2. Updates OrbitControls (required for damping to work).
+   *  3. Renders the scene into `sceneRenderTarget` to capture the original pixels.
+   *  4. Refreshes the `TexturePass` and `compositePass` uniforms so they always
+   *     reference the latest frame's original texture.
+   *  5. Runs the EffectComposer chain (TexturePass → Threshold → Blur×100 → Composite)
+   *     and outputs the bloom-composited result to the screen.
+   *
+   * @param rotatingObject - The mesh to rotate each frame (the emissive cube).
+   */
   animate = (rotatingObject: Mesh): void => {
     rotatingObject.rotation.x += 0.01;
     rotatingObject.rotation.y += 0.01;
@@ -165,6 +254,11 @@ export class ViewerManager {
     requestAnimationFrame(() => this.animate(rotatingObject));
   }
   
+  /**
+   * Handles browser window resize events.
+   * Updates the camera aspect ratio and the renderer's output size to match
+   * the container's new dimensions.
+   */
   onWindowResize = (): void => {
     if (this.camera && this.renderer) {
       this.camera.aspect = this.container.clientWidth / this.container.clientHeight;
